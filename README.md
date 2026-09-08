@@ -119,8 +119,8 @@ python 02_llm_layer.py --real     # uses a real LLM API
 ```
 For the real mode, install the client and set an API key:
 ```bash
-pip install anthropic
-export ANTHROPIC_API_KEY=your_key_here
+pip install google-genai scikit-learn pandas numpy
+set GEMINI_API_KEY=AIza-your-key-here
 ```
 
 ### 4. Run the FastAPI service
