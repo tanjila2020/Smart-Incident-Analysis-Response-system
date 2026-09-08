@@ -12,10 +12,10 @@ Two modes:
     python3 02_llm_layer.py --real     # REAL LLM API (needs key + internet)
 
 For the real mode:
-    pip install anthropic
-    export ANTHROPIC_API_KEY=[key here]
+    pip install google-genai scikit-learn pandas numpy
+    set GEMINI_API_KEY=[your-key-here]
 """
-import os, sys, json, pickle
+import os, sys, json, pickle,re
 import pandas as pd
 
 HERE = os.path.dirname(__file__)
@@ -100,21 +100,38 @@ def assemble_messages(row, severity_label, top_factors):
     )
 
 # ----------------------------------------------------------------------
-# Real LLM call (Anthropic)
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Real LLM call -- GEMINI version (free tier)
+# Requires: pip install google-genai   and   GEMINI_API_KEY set.
 # ----------------------------------------------------------------------
 def call_real_llm(messages):
-    from anthropic import Anthropic
-    client = Anthropic()
-    system = messages[0]["content"]
-    convo = [m for m in messages if m["role"] != "system"]
-    resp = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=400,
-        temperature=0,               # deterministic -> consistent, factual (prompt-eng choice)
-        system=system,
-        messages=convo,
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client()  # reads GEMINI_API_KEY from environment
+
+    # Gemini takes the system prompt separately, and one combined "contents"
+    # string for the conversation. We fold the few-shot examples + the real
+    # question into that contents string.
+    system_text = messages[0]["content"]
+    convo_parts = []
+    for m in messages[1:]:                 # skip the system message
+        role = "User" if m["role"] == "user" else "Assistant"
+        convo_parts.append(f"{role}:\n{m['content']}")
+    contents = "\n\n".join(convo_parts)
+
+    resp = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_text,
+            temperature=0,                 # deterministic, factual
+            max_output_tokens=1000,
+        ),
     )
-    return resp.content[0].text
+    return resp.text
 
 # ----------------------------------------------------------------------
 # Offline mock -- stand-in so the pipeline runs without a key.
@@ -172,10 +189,19 @@ def run(use_real=False):
         messages = assemble_messages(row, label, factors)
 
         raw = call_real_llm(messages) if use_real else call_mock_llm(label, factors)
+        # try:
+        #     report = json.loads(raw)
+        # except json.JSONDecodeError:
+        #     report = {"status": label, "explanation": raw,
+        #               "recommended_action": "(parse error)", "urgency": "?"}
+        text = raw.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
         try:
-            report = json.loads(raw)
+            report = json.loads(text)
         except json.JSONDecodeError:
-            report = {"status": label, "explanation": raw,
+            report = {"status": label, "explanation": text,
                       "recommended_action": "(parse error)", "urgency": "?"}
 
         print(f"\nPredicted severity: {label}")
